@@ -1,12 +1,18 @@
 const {User} = require("../models/user");
-
+const path = require("path");
 const {ctrlWrapper, HttpError} = require("../helpers");
-
+const fs = require("fs/promises");
 const jwt = require("jsonwebtoken");
+const Jimp = require("jimp");
+
+const gravatar = require("gravatar")
 
 const {SECRET_KEY} = process.env;
 
 const bcrypt = require("bcrypt");
+
+const avatarsDir = path.join(__dirname, "../", "public", "avatars");
+
 
 const register = async(req, res) => {
     const {email, password} = req.body;
@@ -15,8 +21,9 @@ const register = async(req, res) => {
 if(user) {
     throw HttpError(409, "Email alredy in use")
   }
-  const hashPassword = await bcrypt.hash(password,10)
-  const newUser = await User.create({...req.body, password: hashPassword});
+  const hashPassword = await bcrypt.hash(password,10);
+  const avatarURL = gravatar.url(email);
+  const newUser = await User.create({...req.body, password: hashPassword, avatarURL});
   
   res.status(201).json({
     email: newUser.email,
@@ -64,9 +71,49 @@ const logout = async(req, res) => {
    })
 }
 
+const updateAvatar = async(req, res) => {
+     const {_id} = req.user;
+     const {path: tempUpload, originalname} = req.file;
+     const filename = `${_id}_${originalname}`;
+
+     try {
+      const reworkedAvatar = await Jimp.read(tempUpload);
+      await reworkedAvatar
+        .autocrop()
+        .cover(
+          250,
+          250,
+          Jimp.HORIZONTAL_ALIGN_CENTER || Jimp.VERTICAL_ALIGN_MIDDLE
+        )
+        .writeAsync(tempUpload);
+
+     const resultUpload = path.join(avatarsDir, filename);
+     await fs.rename(tempUpload, resultUpload);
+     const avatarURL = path.join("avatars", filename);
+     await User.findByIdAndUpdate(_id, {avatarURL});
+
+     res.json({
+      status: "OK",
+      code: 200,
+      message: "Avatar was updated",
+      data: {
+        avatarURL,
+      },
+    });
+  } catch (error) {
+    await fs.unlink(tempUpload);
+
+    res.status(417).json({
+      status: "Expectation Failed",
+      code: 417,
+    });
+  }
+};
+
 module.exports = {
     register: ctrlWrapper(register),
     login: ctrlWrapper(login),
     getCurrent: ctrlWrapper(getCurrent),
     logout: ctrlWrapper(logout),
+    updateAvatar: ctrlWrapper(updateAvatar),
 }
